@@ -1,1 +1,7 @@
-run = "python3 main.py"
+language = "python3"
+
+[env]
+PYTHONPATH = "."
+
+[run]
+command = "poetry run python3 main.py"
