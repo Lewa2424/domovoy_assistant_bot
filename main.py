@@ -8,6 +8,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import config  # Добавлен импорт настроек
+
 from aiogram import Bot, Dispatcher
 from aiogram.types import Message
 from aiogram.enums import ParseMode
@@ -16,15 +18,6 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.filters import Command
 
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler
-
-# Чтение токена и адреса вебхука из переменных окружения
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")
-WEBHOOK_PATH = "/webhook"
-
-# Инициализация бота и диспетчера
-bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-dp = Dispatcher()
 
 # Гарантируем наличие папки
 Path("storage").mkdir(exist_ok=True)
@@ -1440,14 +1433,13 @@ async def back_to_settings_menu(message: Message):
 # === 🧱 БЛОК 51: Запуск бота на сервере (Webhook)
 # ==============================================
 
-import os
-import asyncio
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler
+import config  # обязательно
 
 WEBHOOK_PATH = "/webhook"
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # например, https://yourbot.onrender.com/webhook
+WEBHOOK_URL = config.WEBHOOK_URL
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -1460,10 +1452,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-# Обработка входящих запросов от Telegram
 SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path=WEBHOOK_PATH)
 
-# Основной запуск
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
@@ -1481,21 +1471,9 @@ if __name__ == "__main__":
 #
 # В settings["<ресурс>_напоминание"] теперь храним:
 #   {"день": 21, "время": "17:30", "next_try": "...", "last_sent": "..."}
-#
-import asyncio
-from datetime import datetime, timedelta, time as dtime
-from pathlib import Path
-import json
-from zoneinfo import ZoneInfo
-from aiogram import Bot
-from aiogram.client.default import DefaultBotProperties
-from aiogram.enums import ParseMode
-import os
-BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-# ————————————————————————————————————————————————
-BOT = Bot(token=BOT_TOKEN,
-          default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+from zoneinfo import ZoneInfo
+from datetime import datetime, timedelta
 
 TZ_FALLBACK = ZoneInfo("Europe/Kyiv")
 NIGHT_START = 22  # 22:00
@@ -1524,6 +1502,11 @@ def bump_to_morning(dt: datetime) -> datetime:
 
 
 async def reminder_background_task():
+    import asyncio
+    import json
+    from pathlib import Path
+    from datetime import UTC
+
     lock = asyncio.Lock()          # защита от одновременной записи
     data_file = Path("storage/data.json")
 
@@ -1537,7 +1520,6 @@ async def reminder_background_task():
                 with open(data_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
 
-            from datetime import UTC                 # в начале файла, рядом с другими import
             now_utc = datetime.now(UTC)              # объект сразу «aware»
             updated = False
 
@@ -1631,7 +1613,7 @@ async def reminder_background_task():
 
                     # --- отправка ---------------------------------------------
                     try:
-                        await BOT.send_message(int(user_id), msg)
+                        await bot.send_message(int(user_id), msg)  # исправлено!
                     except Exception as e:
                         print(f"❌ send_message {user_id}: {e}")
 
@@ -1653,7 +1635,6 @@ async def reminder_background_task():
             print(f"⚠️ reminder_background_task: {e}")
 
         await asyncio.sleep(CHECK_INTERVAL)
-
 
 
 
