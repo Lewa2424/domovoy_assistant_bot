@@ -113,7 +113,6 @@ async def electricity_menu_handler(message: Message):
         keyboard=[
             [KeyboardButton(text="➕ Внести показания (электроэнергия)")],
             [KeyboardButton(text="💸 Внести оплату (электроэнергия)")],
-            [KeyboardButton(text="💰 Ввести тариф за свет")],
             [KeyboardButton(text="📉 Посмотреть долг (электроэнергия)")],
             [KeyboardButton(text="📜 История показаний (электроэнергия)")],
             [KeyboardButton(text="🧾 История оплат (электроэнергия)")],
@@ -138,7 +137,6 @@ async def water_menu_handler(message: Message):
         keyboard=[
             [KeyboardButton(text="➕ Внести показания (вода)")],
             [KeyboardButton(text="💸 Внести оплату (вода)")],
-            [KeyboardButton(text="💰 Ввести тариф за воду")],
             [KeyboardButton(text="📉 Посмотреть долг (вода)")],
             [KeyboardButton(text="📜 История показаний (вода)")],
             [KeyboardButton(text="🧾 История оплат (вода)")],
@@ -163,7 +161,6 @@ async def gas_menu_handler(message: Message):
         keyboard=[
             [KeyboardButton(text="➕ Внести показания (газ)")],
             [KeyboardButton(text="💸 Внести оплату (газ)")],
-            [KeyboardButton(text="💰 Ввести тариф за газ")],
             [KeyboardButton(text="📉 Посмотреть долг (газ)")],
             [KeyboardButton(text="📜 История показаний (газ)")],
             [KeyboardButton(text="🧾 История оплат (газ)")],
@@ -334,53 +331,56 @@ async def cleanup_old_records(user_id: str):
 
 
 # =======================================================
-# === 🧱 БЛОК 14: Сохранение новых показаний счётчика ====
+# === 🧱 БЛОК 14: Сохранение новых показаний (NEW) ======
 # =======================================================
-
+#
+# • После записи расхода обнуляем служебные поля
+#   next_try / last_sent у соответствующего счётчика, чтобы
+#   напоминания возобновились только в следующем месяце.
+#
 async def save_reading(message: Message, state: FSMContext, counter_type: str):
     try:
-        value = float(message.text.strip().replace(',', '.'))  # Поддержка запятой
+        value = float(message.text.strip().replace(',', '.'))  # поддержка «1,23»
         user_id = str(message.from_user.id)
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         data_file = Path("storage/data.json")
 
+        data = {}
         if data_file.exists():
             with open(data_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
-        else:
-            data = {}
 
-        if user_id not in data:
-            data[user_id] = {}
-
-        # Используем now как уникальный ключ (дата+время)
-        data[user_id][now] = {}
-
-        # Предыдущее значение
+        user_blob = data.setdefault(user_id, {})
+        # ======= Запись показаний =======
+        user_blob[now] = {}
         prev_value = get_last_value(user_id, counter_type) or 0
-        data[user_id][now][counter_type] = value
+        user_blob[now][counter_type] = value
         usage = value - prev_value if prev_value else 0
 
-        # Получение тарифа из данных
+        # ======= Начисление =======
         tariff_key = f"{counter_type}_тариф"
-        tariff = data[user_id].get("тарифы", {}).get(tariff_key, 1.8)  # Значение по умолчанию 1.8
+        tariff = user_blob.get("тарифы", {}).get(tariff_key, 1.8)
         cost = usage * tariff
+        user_blob[now].setdefault("начисления", {})[counter_type] = cost
 
-        # Сохраняем начисление в тот же временной слот
-        if "начисления" not in data[user_id][now]:
-            data[user_id][now]["начисления"] = {}
-        data[user_id][now]["начисления"][counter_type] = cost
+        # ======= Сброс служебных полей напоминания =======
+        settings = user_blob.setdefault("настройки", {})
+        cfg = settings.setdefault(f"{counter_type}_напоминание", {})
+        cfg.pop("next_try", None)
+        cfg.pop("last_sent", None)
 
-        # Очистка старых записей
+        # ======= Чистка старых записей =======
         await cleanup_old_records(user_id)
 
-        # Сохранение
+        # ======= Сохранение файла =======
         with open(data_file, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
 
+        units = {"электроэнергия": "кВт⋅ч", "вода": "м³", "газ": "м³"}
         await message.answer(
             f"✅ Показания сохранены: {value}\n"
-            f"📊 Расход: {usage:.2f} • Сумма: {cost:.2f} грн"
+            f"📊 Расход: {usage:.2f} {units.get(counter_type, '')} • "
+            f"Сумма: {cost:.2f} грн"
         )
     except ValueError:
         await message.answer("⚠️ Ошибка: введите корректное число")
@@ -505,7 +505,8 @@ async def save_payment(message: Message, state: FSMContext, counter_type: str):
         if "настройки" in data[user_id]:
             initial_debt = float(data[user_id]["настройки"].get(f"{counter_type}_долг", 0))
 
-        for date, items in data[user_id].items():
+        for date in sorted(data[user_id].keys()):
+            items = data[user_id][date]
             if isinstance(items, dict):
                 if "начисления" in items and counter_type in items["начисления"]:
                     total += float(items["начисления"][counter_type])
@@ -523,10 +524,9 @@ async def save_payment(message: Message, state: FSMContext, counter_type: str):
         # Формируем сообщение об оплате
         message_text = [
             f"💸 Оплата сохранена: {amount:.2f} грн",
-            f"💰 Остаток: {remaining_debt:.2f} грн"
+            f"💰 Остаток: {'+' if remaining_debt < 0 else ''}{abs(remaining_debt):.2f} грн"
         ]
 
-        # Добавляем уведомление о состоянии
         if remaining_debt > 0:
             message_text.append("❗ Есть задолженность")
         elif remaining_debt < 0:
@@ -627,9 +627,9 @@ async def view_total_balance(message: Message):
 
         lines.append("")
         if total_balance > 0:
-            lines.append(f"🧮 Итоговый баланс: <b>{total_balance:.2f} грн</b>")
+            lines.append(f"🧮 Итоговая задолженность по коммунальным: <b>{total_balance:.2f} грн</b> ❗")
         elif total_balance < 0:
-            lines.append(f"🧮 Переплата: <b>{abs(total_balance):.2f} грн</b>")
+            lines.append(f"🧮 Итоговая переплата по коммунальным: <b>{abs(total_balance):.2f} грн</b> 💫")
         else:
             lines.append(f"🧮 Всё оплачено: <b>0.00 грн</b> ✅")
 
@@ -639,7 +639,7 @@ async def view_total_balance(message: Message):
 
 
 # =======================================================
-# === 🧱 БЛОК 24: Общая функция расчёта долга ===========
+# === 🧱 БЛОК 24: Общая функция расчёта долга ==========
 # =======================================================
 
 async def show_debt(message: Message, counter_type: str):
@@ -650,38 +650,64 @@ async def show_debt(message: Message, counter_type: str):
         total = 0.0
         paid = 0.0
         initial_debt = 0.0
+        last_reading_val = None
+        last_reading_date = None
 
         if data_file.exists():
             with open(data_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
             if user_id in data:
-                # Получаем начальный долг из настроек
                 if "настройки" in data[user_id]:
                     initial_debt = float(data[user_id]["настройки"].get(f"{counter_type}_долг", 0))
 
-                # Собираем все начисления и оплаты
-                for date, items in data[user_id].items():
+                for date_str in sorted(data[user_id].keys()):
+                    items = data[user_id][date_str]
                     if isinstance(items, dict):
-                        # Учитываем начисления
                         if "начисления" in items and counter_type in items["начисления"]:
                             total += float(items["начисления"][counter_type])
+                            if counter_type in items:
+                                last_reading_val = float(items[counter_type])
+                            last_reading_date = date_str
 
-                        # Учитываем оплаты
                         payment_key = f"{counter_type}_оплата"
                         if payment_key in items:
                             paid += float(items[payment_key])
 
-        # Добавляем начальный долг к общей сумме
         total += initial_debt
         debt = total - paid
 
-        await message.answer(
-            f"📉 <b>{counter_type.capitalize()}</b>:\n"
-            f"Начальный долг: {initial_debt:.2f} грн\n"
-            f"Начислено: {(total - initial_debt):.2f} грн\n"
-            f"Оплачено: {paid:.2f} грн\n"
-            f"Итоговый долг: <b>{debt:.2f} грн</b>"
-        )
+        def fmt_date(d):
+            try:
+                return datetime.strptime(d, "%Y-%m-%d %H:%M:%S").strftime("%d.%m.%Y")
+            except:
+                try:
+                    return datetime.strptime(d, "%Y-%m-%d").strftime("%d.%m.%Y")
+                except:
+                    return d or "-"
+
+        # Определяем единицу измерения
+        units = {
+            "электроэнергия": "кВт⋅ч",
+            "вода": "м³",
+            "газ": "м³"
+        }
+
+        details = []
+
+        usage_note = ""
+        if last_reading_val and last_reading_date:
+            unit = units.get(counter_type, "")
+            usage_note = f" (включая начисления по последним показаниям {last_reading_val} {unit} от {fmt_date(last_reading_date)})"
+
+        details.append(f"📉 <b>{counter_type.capitalize()}</b>:")
+        if debt > 0:
+            details.append(f"Итоговый долг{usage_note}:\n<b>{debt:.2f} грн</b>")
+        elif debt < 0:
+            details.append(f"Итоговая переплата{usage_note}:\n<b>{abs(debt):.2f} грн</b>")
+        else:
+            details.append(f"💰 Всё оплачено{usage_note}:\n<b>0.00 грн</b>")
+
+        await message.answer("\n".join(details))
     except Exception as e:
         await message.answer(f"⚠️ Ошибка при расчёте долга: {e}")
 
@@ -728,8 +754,6 @@ async def show_history(message: Message, counter_type: str, unit: str):
                     initial_key = f"{counter_type}_показания"
                     if initial_key in data[user_id]["настройки"]:
                         initial_reading = float(data[user_id]["настройки"][initial_key])
-                        initial_date = datetime.min  # Для правильной сортировки
-                        entries.append((initial_date, initial_reading))
 
                 # Собираем все показания
                 for date_str, items in data[user_id].items():
@@ -744,31 +768,28 @@ async def show_history(message: Message, counter_type: str, unit: str):
                         val = float(items[counter_type])
                         entries.append((dt, val))
 
-        # Сортируем все записи по дате
         entries.sort()
 
-        # Формируем вывод с разницей между показаниями
         if entries:
             lines = []
-            if initial_reading is not None:
-                lines.append(f"📌 Начальное показание: {initial_reading} {unit}")
 
             for i in range(len(entries)):
                 dt, val = entries[i]
-                if dt == datetime.min:  # Пропускаем начальное показание в основном списке
-                    continue
-
-                # Расчет разницы с предыдущим показанием
-                prev_val = entries[i-1][1] if i > 0 else initial_reading or val
-                diff = val - prev_val
-
-                lines.append(
-                    f"{dt.strftime('%d/%m/%y %H:%M')} — {val} {unit}\n"
-                    f"└─ Разница: {diff:+.2f} {unit}"
-                )
+                if i == 0 and initial_reading is not None:
+                    diff = val - initial_reading
+                    lines.append(
+                        f"{dt.strftime('%d/%m/%y %H:%M')} — {val} {unit}\n"
+                        f"└─ Разница с начальными показаниями: {diff:+.2f} {unit}"
+                    )
+                else:
+                    prev_val = entries[i - 1][1]
+                    diff = val - prev_val
+                    lines.append(
+                        f"{dt.strftime('%d/%m/%y %H:%M')} — {val} {unit}\n"
+                        f"└─ Разница: {diff:+.2f} {unit}"
+                    )
 
             message_text = "📜 История показаний:\n" + "\n".join(lines)
-            # Если сообщение слишком длинное, разбиваем на части
             if len(message_text) > 4000:
                 parts = [message_text[i:i+4000] for i in range(0, len(message_text), 4000)]
                 for part in parts:
@@ -994,6 +1015,7 @@ async def electricity_settings_handler(message: Message):
         keyboard=[
             [KeyboardButton(text="📝 Внести начальные показания электроэнергии")],
             [KeyboardButton(text="💰 Внести начальный долг за электроэнергию")],
+            [KeyboardButton(text="💰 Ввести тариф за свет")],
             [KeyboardButton(text="⏰ Установить напоминание (электроэнергия)")],
             [KeyboardButton(text="🔙 К настройкам")],
         ],
@@ -1015,6 +1037,7 @@ async def water_settings_handler(message: Message):
         keyboard=[
             [KeyboardButton(text="📝 Внести начальные показания воды")],
             [KeyboardButton(text="💰 Внести начальный долг за воду")],
+            [KeyboardButton(text="💰 Ввести тариф за воду")],
             [KeyboardButton(text="⏰ Установить напоминание (вода)")],
             [KeyboardButton(text="🔙 К настройкам")],
         ],
@@ -1036,6 +1059,7 @@ async def gas_settings_handler(message: Message):
         keyboard=[
             [KeyboardButton(text="📝 Внести начальные показания газа")],
             [KeyboardButton(text="💰 Внести начальный долг за газ")],
+            [KeyboardButton(text="💰 Ввести тариф за газ")],
             [KeyboardButton(text="⏰ Установить напоминание (газ)")],
             [KeyboardButton(text="🔙 К настройкам")],
         ],
@@ -1073,7 +1097,7 @@ class ReminderState(StatesGroup):
 @dp.message(lambda message: message.text == "⏰ Установить напоминание (электроэнергия)")
 async def set_reminder_electricity(message: Message, state: FSMContext):
     await state.set_state(ReminderState.electricity)
-    await message.answer("⏰ Введите день и время напоминания для электроэнергии через пробел:\n<b>20 08:00</b>")
+    await message.answer("⏰ Введите день и время напоминания для электроэнергии через пробел:\n<b>01 08:00</b>")
 
 
 @dp.message(ReminderState.electricity)
@@ -1084,7 +1108,7 @@ async def save_reminder_electricity(message: Message, state: FSMContext):
 @dp.message(lambda message: message.text == "⏰ Установить напоминание (вода)")
 async def set_reminder_water(message: Message, state: FSMContext):
     await state.set_state(ReminderState.water)
-    await message.answer("⏰ Введите день и время напоминания для воды через пробел:\n<b>20 08:00</b>")
+    await message.answer("⏰ Введите день и время напоминания для воды через пробел:\n<b>01 08:00</b>")
 
 
 @dp.message(ReminderState.water)
@@ -1095,7 +1119,7 @@ async def save_reminder_water(message: Message, state: FSMContext):
 @dp.message(lambda message: message.text == "⏰ Установить напоминание (газ)")
 async def set_reminder_gas(message: Message, state: FSMContext):
     await state.set_state(ReminderState.gas)
-    await message.answer("⏰ Введите день и время напоминания для газа через пробел:\n<b>20 08:00</b>")
+    await message.answer("⏰ Введите день и время напоминания для газа через пробел:\n<b>01 08:00</b>")
 
 
 @dp.message(ReminderState.gas)
@@ -1104,28 +1128,25 @@ async def save_reminder_gas(message: Message, state: FSMContext):
 
 
 # =======================================================
-# === 🧱 БЛОК 40.2: Общая функция сохранения напоминания ==
+# === 🧱 БЛОК 40.2: сохранение напоминания   (NEW) ======
 # =======================================================
-
+#
+# • При каждой установке стираем служебные поля
+#   next_try / last_sent, чтобы цикл начал работу с «чистого листа».
+# • Логика ввода (день-время) не менялась.
+#
 async def save_reminder_time(message: Message, state: FSMContext, counter_type: str):
     try:
         from datetime import datetime
-        import json
         from pathlib import Path
+        import json
 
-        input_text = message.text.strip()
-        parts = input_text.split()
-
-        if len(parts) != 2:
-            raise ValueError("Неверное количество компонентов")
-
-        day_str, time_str = parts
+        day_str, time_str = message.text.strip().split()
         day = int(day_str)
         if not (1 <= day <= 31):
-            raise ValueError("Недопустимый день месяца")
+            raise ValueError("Недопустимый день")
 
-        # Проверка формата времени
-        datetime.strptime(time_str, "%H:%M")
+        datetime.strptime(time_str, "%H:%M")  # проверка формата HH:MM
 
         user_id = str(message.from_user.id)
         data_file = Path("storage/data.json")
@@ -1136,25 +1157,29 @@ async def save_reminder_time(message: Message, state: FSMContext, counter_type: 
         else:
             data = {}
 
-        if user_id not in data:
-            data[user_id] = {}
-        if "настройки" not in data[user_id]:
-            data[user_id]["настройки"] = {}
+        settings = data.setdefault(user_id, {}).setdefault("настройки", {})
 
         key = f"{counter_type}_напоминание"
-        data[user_id]["настройки"][key] = {
-            "день": day,
-            "время": time_str
-        }
+        cfg = settings.setdefault(key, {})
+        cfg["день"] = day
+        cfg["время"] = time_str
+        # — сброс служебных полей —
+        cfg.pop("next_try", None)
+        cfg.pop("last_sent", None)
 
         with open(data_file, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
 
-        await message.answer(f"✅ Напоминание для «{counter_type}» установлено: {day} числа каждого месяца в {time_str}")
+        await message.answer(
+            f"✅ Напоминание для «{counter_type}» установлено: "
+            f"{day} числа каждого месяца в {time_str}"
+        )
     except ValueError:
-        await message.answer("⚠️ Неверный формат. Введите день и время через пробел, например:\n<b>20 08:00</b>")
+        await message.answer(
+            "⚠️ Неверный ввод. Пример правильного формата:\n<b>01 08:00</b>"
+        )
     except Exception as e:
-        await message.answer(f"⚠️ Ошибка при сохранении напоминания: {e}")
+        await message.answer(f"⚠️ Ошибка при сохранении: {e}")
     finally:
         await state.clear()
 
@@ -1380,147 +1405,226 @@ async def back_to_settings_menu(message: Message):
     await settings_menu_handler(message)
 
 
-# ===================================
-# === 🧱 БЛОК 51: Запуск бота ========
-# ===================================
+# ==============================================
+# === 🧱 БЛОК 51: Запуск бота на сервере (Webhook)
+# ==============================================
 
-async def main():
-    try:
-        me = await bot.get_me()
-        print(f"✅ Бот @{me.username} запущен и готов к работе")
+import os
+from fastapi import FastAPI
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler
+from aiogram.enums import ParseMode
 
-        asyncio.create_task(reminder_background_task())
-        await dp.start_polling(bot)
+WEBHOOK_PATH = "/webhook"
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # например, https://yourbot.onrender.com/webhook
 
-    except asyncio.CancelledError:
-        print("⚠️ Получен сигнал отмены asyncio. Завершаем...")
+app = FastAPI()
 
-    except KeyboardInterrupt:
-        print("🛑 Бот остановлен вручную")
+@app.on_event("startup")
+async def on_startup():
+    await bot.set_webhook(WEBHOOK_URL)
+    asyncio.create_task(reminder_background_task())
+    print(f"✅ Webhook установлен: {WEBHOOK_URL}")
 
-    except Exception as e:
-        print(f"❌ Неожиданная ошибка: {e}")
+@app.on_event("shutdown")
+async def on_shutdown():
+    await bot.delete_webhook()
+    print("🔻 Webhook удалён")
 
-    finally:
-        print("🔁 Все задачи завершены. До новых встреч!")
+# Обработка входящих запросов от Telegram
+SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path=WEBHOOK_PATH)
+
+# Основной запуск (Render запускает через uvicorn)
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
 
 
 # =======================================================
-# === 🧱 БЛОК 51.1: Фоновая задача по напоминаниям ======
+# === 🧱 БЛОК 51.1: Фоновая задача по напоминаниям v2 ===
 # =======================================================
+#
+#  • Ночная «тишина» 22:00 – 08:00 (Europe/Kyiv ± user TZ)
+#  • Повтор каждые 4 ч → next_try
+#  • «Мягкое» уведомление, если показания < 2 суток
+#  • Сброс next_try после ввода новых показаний (см. блок 14)
+#
+# В settings["<ресурс>_напоминание"] теперь храним:
+#   {"день": 21, "время": "17:30", "next_try": "...", "last_sent": "..."}
+#
+import asyncio
+from datetime import datetime, timedelta, time as dtime
+from pathlib import Path
+import json
+from zoneinfo import ZoneInfo
+from aiogram import Bot
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
+from config import BOT_TOKEN
+
+# ————————————————————————————————————————————————
+BOT = Bot(token=BOT_TOKEN,
+          default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+
+TZ_FALLBACK = ZoneInfo("Europe/Kyiv")
+NIGHT_START = 22  # 22:00
+NIGHT_END = 8     # 08:00
+CHECK_INTERVAL = 60  # сек
+
+EMOJI = {"электроэнергия": "⚡",
+         "вода": "💧",
+         "газ": "🔥"}
+
+
+def is_night(dt: datetime) -> bool:
+    """22:00 ≤ t < 24:00  or  00:00 ≤ t < 08:00."""
+    return dt.hour >= NIGHT_START or dt.hour < NIGHT_END
+
+
+def bump_to_morning(dt: datetime) -> datetime:
+    """Перенести dt на ближайшие 08:00 local morning."""
+    if dt.hour >= NIGHT_START:
+        dt = (dt + timedelta(days=1)).replace(hour=NIGHT_END, minute=0,
+                                              second=0, microsecond=0)
+    else:  # среди ночи
+        dt = dt.replace(hour=NIGHT_END, minute=0,
+                        second=0, microsecond=0)
+    return dt
+
 
 async def reminder_background_task():
-    from datetime import datetime, timedelta
-    import json
-    from pathlib import Path
-
-    CHECK_INTERVAL = 7200  # каждые 2 часа
+    lock = asyncio.Lock()          # защита от одновременной записи
+    data_file = Path("storage/data.json")
 
     while True:
         try:
-            data_file = Path("storage/data.json")
             if not data_file.exists():
                 await asyncio.sleep(CHECK_INTERVAL)
                 continue
 
-            with open(data_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
+            async with lock:
+                with open(data_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
 
-            now = datetime.now()
-            current_day = now.day
-            current_time = now.strftime("%H:%M")
+            from datetime import UTC                 # в начале файла, рядом с другими import
+            now_utc = datetime.now(UTC)              # объект сразу «aware»
+            updated = False
 
-            updated = False  # чтобы не перезаписывать JSON без нужды
-
+            # ======= Цикл по пользователям =========
             for user_id, user_data in data.items():
                 if not isinstance(user_data, dict):
                     continue
 
-                settings = user_data.setdefault("настройки", {})
-                sent_flags = settings.setdefault("напоминания_отправлены", {})
+                # попытка вытащить ТZ, если ранее сохраняли
+                user_tz = ZoneInfo(
+                    user_data.get("настройки", {}).get("tz", "UTC"))
+                if str(user_tz) == "UTC":
+                    user_tz = TZ_FALLBACK
 
-                for resource in ["электроэнергия", "вода", "газ"]:
-                    reminder_key = f"{resource}_напоминание"
-                    if reminder_key not in settings:
+                now = now_utc.astimezone(user_tz)
+                current_day = now.day
+
+                settings = user_data.setdefault("настройки", {})
+                for resource in ("электроэнергия", "вода", "газ"):
+                    cfg = settings.get(f"{resource}_напоминание")
+                    if not cfg or not isinstance(cfg, dict):
                         continue
 
-                    reminder_config = settings.get(reminder_key)
-                    if not isinstance(reminder_config, dict):
-                        continue  # устаревший формат
+                    # --- плановое время текущего месяца ---
+                    if cfg.get("день") != current_day:
+                        continue
 
-                    if (
-                        reminder_config.get("день") != current_day or
-                        reminder_config.get("время") != current_time
-                    ):
-                        continue  # не сегодня или не сейчас
+                    try:
+                        hh, mm = map(int, cfg["время"].split(":"))
+                        plan_dt = now.replace(hour=hh, minute=mm,
+                                              second=0, microsecond=0)
+                    except Exception:
+                        continue  # некорректное «время»
 
-                    # Проверка последнего напоминания
-                    last_sent_str = sent_flags.get(resource)
-                    last_sent_dt = None
-                    if last_sent_str:
+                    # --- следующий слот ---
+                    next_try = None
+                    if "next_try" in cfg:
                         try:
-                            last_sent_dt = datetime.strptime(last_sent_str, "%Y-%m-%d %H:%M")
+                            next_try = datetime.fromisoformat(
+                                cfg["next_try"]).astimezone(user_tz)
                         except ValueError:
-                            pass
+                            cfg.pop("next_try", None)
 
-                    if last_sent_dt and (now - last_sent_dt).days < 5:
-                        continue  # уже напоминали недавно
+                    # due_to_send? ------------------------------------------------
+                    due = False
+                    if next_try:
+                        if now >= next_try:
+                            due = True
+                    else:  # первая попытка
+                        if abs((now - plan_dt).total_seconds()) <= 120:
+                            due = True
 
-                    # Ищем последние показания
-                    last_date = None
+                    if not due:
+                        continue
+
+                    # ночное окно? переносим, но пишем next_try
+                    if is_night(now):
+                        cfg["next_try"] = bump_to_morning(now).isoformat()
+                        updated = True
+                        continue
+
+                    # «мягкое»? ищем дату последнего показания
+                    last_read_dt = None
                     for date_str in sorted(user_data.keys(), reverse=True):
-                        if date_str in ["тарифы", "настройки"]:
+                        if date_str in ("тарифы", "настройки"):
                             continue
                         if resource in user_data[date_str]:
                             try:
-                                last_date = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
+                                last_read_dt = datetime.strptime(
+                                    date_str, "%Y-%m-%d %H:%M:%S")
                             except ValueError:
                                 try:
-                                    last_date = datetime.strptime(date_str, "%Y-%m-%d")
+                                    last_read_dt = datetime.strptime(
+                                        date_str, "%Y-%m-%d")
                                 except ValueError:
-                                    continue
+                                    pass
                             break
 
-                    if not last_date or (now - last_date).days >= 2:
-                        try:
-                            from config import BOT_TOKEN
-                            from aiogram import Bot
-                            bot = Bot(token=BOT_TOKEN, parse_mode="HTML")
+                    soft = (last_read_dt and
+                            (now - last_read_dt).days < 2)
 
-                            emojis = {
-                                "электроэнергия": "⚡",
-                                "вода": "💧",
-                                "газ": "🔥"
-                            }
+                    if soft:
+                        msg = (f"⏰ Напоминание!\n"
+                               f"{EMOJI[resource]} Вы вносили показания "
+                               f"<b>{last_read_dt.strftime('%d.%m.%Y %H:%M')}</b>.\n"
+                               f"При необходимости можно обновить.")
+                    else:
+                        msg = (f"⏰ Напоминание!\n"
+                               f"{EMOJI[resource]} Пора внести показания "
+                               f"за <b>{resource}</b>.")
 
-                            text = (
-                                f"⏰ Напоминание!\n"
-                                f"{emojis[resource]} Пора внести показания за <b>{resource}</b>.\n"
-                                f"Если уже внесли — это уведомление исчезнет."
-                            )
-                            await bot.send_message(chat_id=user_id, text=text)
+                    # --- отправка ---------------------------------------------
+                    try:
+                        await BOT.send_message(int(user_id), msg)
+                    except Exception as e:
+                        print(f"❌ send_message {user_id}: {e}")
 
-                            # Обновляем флаг
-                            sent_flags[resource] = now.strftime("%Y-%m-%d %H:%M")
-                            updated = True
-                        except Exception as e:
-                            print(f"❌ Ошибка отправки напоминания: {e}")
+                    # --- записываем служебные поля ----------------------------
+                    cfg["last_sent"] = now.isoformat()
+                    nxt = now + timedelta(hours=4)
+                    if is_night(nxt):
+                        nxt = bump_to_morning(nxt)
+                    cfg["next_try"] = nxt.isoformat()
+                    updated = True
 
+            # ======= запись файла при изменениях =========
             if updated:
-                with open(data_file, "w", encoding="utf-8") as f:
-                    json.dump(data, f, ensure_ascii=False, indent=2)
+                async with lock:
+                    with open(data_file, "w", encoding="utf-8") as f:
+                        json.dump(data, f, ensure_ascii=False, indent=2)
 
         except Exception as e:
-            print(f"⚠️ Ошибка в фоновой задаче: {e}")
+            print(f"⚠️ reminder_background_task: {e}")
 
         await asyncio.sleep(CHECK_INTERVAL)
 
 
 
 
-
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        pass  # уже обработано в main()
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
