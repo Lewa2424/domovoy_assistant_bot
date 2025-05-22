@@ -9,8 +9,11 @@ from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.filters import Command
-import config
+from config import bot, reminder_background_task
 
+dp = Dispatcher()
+
+import config  # если где-то в коде всё ещё используется config.XXX
 
 # =======================================================
 # === 🧱 БЛОК 2: Инициализация бота и диспетчера ========
