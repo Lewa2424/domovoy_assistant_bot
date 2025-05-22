@@ -1433,17 +1433,20 @@ async def back_to_settings_menu(message: Message):
 # === 🧱 БЛОК 51: Запуск бота на сервере (Webhook)
 # ==============================================
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 from contextlib import asynccontextmanager
-from aiogram.webhook.aiohttp_server import SimpleRequestHandler
 import config  # обязательно
+from aiogram.types import Update
 
 WEBHOOK_PATH = "/webhook"
 WEBHOOK_URL = config.WEBHOOK_URL
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await bot.set_webhook(WEBHOOK_URL)
+    await bot.set_webhook(
+        url=WEBHOOK_URL,
+        allowed_updates=dp.resolve_used_update_types()
+    )
     asyncio.create_task(reminder_background_task())
     print(f"✅ Webhook установлен: {WEBHOOK_URL}")
     yield
@@ -1452,12 +1455,16 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path=WEBHOOK_PATH)
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
-
+@app.post(WEBHOOK_PATH)
+async def bot_webhook_endpoint(request: Request):
+    try:
+        update_data = await request.json()
+        telegram_update = Update.model_validate(update_data, context={"bot": bot})
+        await dp.feed_webhook_update(bot=bot, update=telegram_update)
+        return Response(status_code=200)
+    except Exception as e:
+        print(f"⚠️ Ошибка в эндпоинте вебхука: {e}")
+        return Response(status_code=500)
 
 
 # =======================================================
