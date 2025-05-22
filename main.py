@@ -1444,8 +1444,6 @@ from fastapi import FastAPI
 from contextlib import asynccontextmanager
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler
 
-from config import dp, bot, reminder_background_task  # убедись, что эти импорты у тебя уже есть
-
 WEBHOOK_PATH = "/webhook"
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # например, https://yourbot.onrender.com/webhook
 
@@ -1467,6 +1465,7 @@ SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path=WEBHOOK_PATH)
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
+
 
 
 # =======================================================
