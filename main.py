@@ -725,7 +725,7 @@ async def show_debt(message: Message, counter_type: str):
 # === 🧱 БЛОК 25: Обработка кнопки 🔙 Назад в меню ======
 # =======================================================
 
-@dp.message(lambda message: message.text == "🔙 Назад")
+@dp.message(lambda message: message.text and "назад" in message.text.lower().strip())
 async def back_to_main_menu(message: Message):
     keyboard = ReplyKeyboardMarkup(
         keyboard=[
