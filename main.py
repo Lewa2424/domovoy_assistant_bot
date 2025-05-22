@@ -1406,30 +1406,31 @@ async def back_to_settings_menu(message: Message):
 # ==============================================
 
 import os
+import asyncio
 from fastapi import FastAPI
+from contextlib import asynccontextmanager
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler
-from aiogram.enums import ParseMode
+
+from config import dp, bot, reminder_background_task  # убедись, что эти импорты у тебя уже есть
 
 WEBHOOK_PATH = "/webhook"
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # например, https://yourbot.onrender.com/webhook
 
-app = FastAPI()
-
-@app.on_event("startup")
-async def on_startup():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     await bot.set_webhook(WEBHOOK_URL)
     asyncio.create_task(reminder_background_task())
     print(f"✅ Webhook установлен: {WEBHOOK_URL}")
-
-@app.on_event("shutdown")
-async def on_shutdown():
+    yield
     await bot.delete_webhook()
     print("🔻 Webhook удалён")
+
+app = FastAPI(lifespan=lifespan)
 
 # Обработка входящих запросов от Telegram
 SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path=WEBHOOK_PATH)
 
-# Основной запуск (Render запускает через uvicorn)
+# Основной запуск
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
@@ -1455,7 +1456,8 @@ from zoneinfo import ZoneInfo
 from aiogram import Bot
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from config import BOT_TOKEN
+import os
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 # ————————————————————————————————————————————————
 BOT = Bot(token=BOT_TOKEN,
