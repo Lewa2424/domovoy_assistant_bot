@@ -1,6 +1,0 @@
-language = "python3"
-run = "PYTHONPATH=$HOME/.local/lib/python3.10/site-packages python3 main.py"
-
-[[ports]]
-localPort = 8080
-externalPort = 80
