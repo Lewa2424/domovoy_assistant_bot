@@ -4,6 +4,10 @@
 
 import asyncio
 import os
+from datetime import datetime, timedelta
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
 from aiogram import Bot, Dispatcher
 from aiogram.types import Message
 from aiogram.enums import ParseMode
@@ -11,16 +15,37 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.filters import Command
 
-from config import reminder_background_task  # теперь только напоминания
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler
 
-# Чтение токена из переменной окружения
+# Чтение токена и адреса вебхука из переменных окружения
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+WEBHOOK_PATH = "/webhook"
 
 # Инициализация бота и диспетчера
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 
-# =======================================================
+# Гарантируем наличие папки
+Path("storage").mkdir(exist_ok=True)
+
+# Фоновая задача напоминаний
+async def reminder_background_task():
+    data_file = Path("storage/data.json")
+    CHECK_INTERVAL = 60  # сек
+    while True:
+        try:
+            if not data_file.exists():
+                await asyncio.sleep(CHECK_INTERVAL)
+                continue
+            with open(data_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            now_utc = datetime.now(ZoneInfo("UTC"))
+            # тут можно вставить минимальную логику (например, просто лог)
+            print(f"🔄 Напоминания проверены в {now_utc}")
+        except Exception as e:
+            print(f"⚠️ reminder_background_task: {e}")
+        await asyncio.sleep(CHECK_INTERVAL) =======================================================
 # === 🧱 БЛОК 2: Инициализация бота и диспетчера ========
 # =======================================================
 
