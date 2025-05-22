@@ -11,34 +11,19 @@ from zoneinfo import ZoneInfo
 import config  # Добавлен импорт настроек
 
 from aiogram import Bot, Dispatcher
-from aiogram.types import Message
+from aiogram.types import Message, Update # Убедимся, что Update здесь, если он нужен глобально, или оставим его импорт в БЛОКЕ 51
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.filters import Command
 
-from aiogram.webhook.aiohttp_server import SimpleRequestHandler
+# Строка ниже УДАЛЕНА: from aiogram.webhook.aiohttp_server import SimpleRequestHandler
 
 # Гарантируем наличие папки
 Path("storage").mkdir(exist_ok=True)
 
-# Фоновая задача напоминаний
-async def reminder_background_task():
-    data_file = Path("storage/data.json")
-    CHECK_INTERVAL = 60  # сек
-    while True:
-        try:
-            if not data_file.exists():
-                await asyncio.sleep(CHECK_INTERVAL)
-                continue
-            with open(data_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            now_utc = datetime.now(ZoneInfo("UTC"))
-            # тут можно вставить минимальную логику (например, просто лог)
-            print(f"🔄 Напоминания проверены в {now_utc}")
-        except Exception as e:
-            print(f"⚠️ reminder_background_task: {e}")
-        await asyncio.sleep(CHECK_INTERVAL)
+# Первая (упрощенная) версия функции reminder_background_task() отсюда УДАЛЕНА.
+# Теперь будет использоваться версия из БЛОКА 51.1.
 
 # =======================================================
 # === 🧱 БЛОК 2: Инициализация бота и диспетчера ========
