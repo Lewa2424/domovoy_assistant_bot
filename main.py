@@ -246,61 +246,35 @@ async def gas_history(message: Message):
 
 
 # =======================================================
-# === 🧱 БЛОК 10: Ввод показаний ⚡ Электроэнергии =======
+# === 🧱 БЛОК 10-12: старт ввода показаний  (FIXED) ======
 # =======================================================
 
-@dp.message(lambda message: message.text == "➕ Внести показания (электроэнергия)")
+@dp.message(lambda m: m.text == "➕ Внести показания (электроэнергия)")
 async def start_electricity_reading(message: Message, state: FSMContext):
     await state.set_state(ReadingState.electricity)
     last = get_last_value(message.from_user.id, "электроэнергия")
     msg = "Введите текущие показания электроэнергии (кВт⋅ч):"
     if last is not None:
-        msg += f"\n_(предыдущее: {last})_"
-    await message.answer(msg, parse_mode="Markdown")
+        msg += f"\n(предыдущее: {last})"
+    await message.answer(msg)                         # без parse_mode
 
-@dp.message(ReadingState.electricity)
-async def save_electricity_reading(message: Message, state: FSMContext):
-    await save_reading(message, state, "электроэнергия")
-    await state.clear()
-
-
-# =======================================================
-# === 🧱 БЛОК 11: Ввод показаний 💧 Воды ================
-# =======================================================
-
-@dp.message(lambda message: message.text == "➕ Внести показания (вода)")
+@dp.message(lambda m: m.text == "➕ Внести показания (вода)")
 async def start_water_reading(message: Message, state: FSMContext):
     await state.set_state(ReadingState.water)
     last = get_last_value(message.from_user.id, "вода")
     msg = "Введите текущие показания по воде (м³):"
     if last is not None:
-        msg += f"\n_(предыдущее: {last})_"
-    await message.answer(msg, parse_mode="Markdown")
+        msg += f"\n(предыдущее: {last})"
+    await message.answer(msg)
 
-@dp.message(ReadingState.water)
-async def save_water_reading(message: Message, state: FSMContext):
-    await save_reading(message, state, "вода")
-    await state.clear()
-
-
-# =======================================================
-# === 🧱 БЛОК 12: Ввод показаний 🔥 Газа ================
-# =======================================================
-
-@dp.message(lambda message: message.text == "➕ Внести показания (газ)")
+@dp.message(lambda m: m.text == "➕ Внести показания (газ)")
 async def start_gas_reading(message: Message, state: FSMContext):
     await state.set_state(ReadingState.gas)
     last = get_last_value(message.from_user.id, "газ")
     msg = "Введите текущие показания по газу (м³):"
     if last is not None:
-        msg += f"\n_(предыдущее: {last})_"
-    await message.answer(msg, parse_mode="Markdown")
-
-@dp.message(ReadingState.gas)
-async def save_gas_reading(message: Message, state: FSMContext):
-    await save_reading(message, state, "газ")
-    await state.clear()
-
+        msg += f"\n(предыдущее: {last})"
+    await message.answer(msg)
 
 # =======================================================
 # === 🧱 БЛОК 13: Очистка старых записей из базы данных =
