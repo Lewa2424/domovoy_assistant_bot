@@ -1630,6 +1630,10 @@ async def reminder_background_task():
 
 
 
+@app.get("/")
+async def root():
+    return {"status": "alive"}
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
