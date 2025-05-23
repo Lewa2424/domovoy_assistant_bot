@@ -6,7 +6,10 @@
 import logging
 logging.basicConfig(level=logging.INFO)       # общий лог
 logging.getLogger("aiogram.event").setLevel(logging.DEBUG)
+logging.getLogger("aiogram.bot.api").setLevel(logging.ERROR)  # HTTP-ошибки Telegram
+logging.getLogger("aiogram.dispatcher.dispatcher").setLevel(logging.ERROR)
 # =======================================================
+
 
 import asyncio
 import os
