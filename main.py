@@ -1630,17 +1630,9 @@ async def reminder_background_task():
 
 
 
-from fastapi import FastAPI, Response
-
-app = FastAPI()
-
 @app.get("/")
 async def root():
     return {"status": "alive"}
-
-@app.head("/")
-async def root_head():
-    return Response(status_code=200)
 
 if __name__ == "__main__":
     import uvicorn
