@@ -1630,11 +1630,24 @@ async def reminder_background_task():
 
 
 
-@app.get("/")
-async def root():
-    return {"status": "alive"}
+# =======================================================
+# === 🧱 БЛОК Майн: корневой энд-поинт GET + HEAD =======
+# =======================================================
+
+from fastapi import Response   # импорт FastAPI выше уже есть; дубли не страшны
+
+@app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
+async def root() -> Response:
+    """
+    Render посылает HEAD / для health-check.
+    Отдаём 200 OK и при GET, и при HEAD — тогда
+    контейнер не перезапускается.
+    """
+    return Response(content='{"status":"alive"}',
+                    media_type="application/json")
 
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
+
 
