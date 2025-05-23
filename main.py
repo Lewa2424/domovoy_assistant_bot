@@ -1506,7 +1506,7 @@ async def reminder_background_task():
     import asyncio
     import json
     from pathlib import Path
-    from datetime import UTC
+    now_utc = datetime.now(timezone.utc)
 
     lock = asyncio.Lock()          # защита от одновременной записи
     data_file = Path("storage/data.json")
