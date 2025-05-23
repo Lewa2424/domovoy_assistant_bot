@@ -1474,7 +1474,7 @@ async def bot_webhook_endpoint(request: Request):
 #   {"день": 21, "время": "17:30", "next_try": "...", "last_sent": "..."}
 
 from zoneinfo import ZoneInfo
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 TZ_FALLBACK = ZoneInfo("Europe/Kyiv")
 NIGHT_START = 22  # 22:00
@@ -1506,7 +1506,6 @@ async def reminder_background_task():
     import asyncio
     import json
     from pathlib import Path
-    now_utc = datetime.now(timezone.utc)
 
     lock = asyncio.Lock()          # защита от одновременной записи
     data_file = Path("storage/data.json")
@@ -1521,7 +1520,7 @@ async def reminder_background_task():
                 with open(data_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
 
-            now_utc = datetime.now(UTC)              # объект сразу «aware»
+            now_utc = datetime.now(timezone.utc)  # исправлено!
             updated = False
 
             # ======= Цикл по пользователям =========
@@ -1529,7 +1528,6 @@ async def reminder_background_task():
                 if not isinstance(user_data, dict):
                     continue
 
-                # попытка вытащить ТZ, если ранее сохраняли
                 user_tz = ZoneInfo(
                     user_data.get("настройки", {}).get("tz", "UTC"))
                 if str(user_tz) == "UTC":
@@ -1544,7 +1542,6 @@ async def reminder_background_task():
                     if not cfg or not isinstance(cfg, dict):
                         continue
 
-                    # --- плановое время текущего месяца ---
                     if cfg.get("день") != current_day:
                         continue
 
@@ -1553,9 +1550,8 @@ async def reminder_background_task():
                         plan_dt = now.replace(hour=hh, minute=mm,
                                               second=0, microsecond=0)
                     except Exception:
-                        continue  # некорректное «время»
+                        continue
 
-                    # --- следующий слот ---
                     next_try = None
                     if "next_try" in cfg:
                         try:
@@ -1564,25 +1560,22 @@ async def reminder_background_task():
                         except ValueError:
                             cfg.pop("next_try", None)
 
-                    # due_to_send? ------------------------------------------------
                     due = False
                     if next_try:
                         if now >= next_try:
                             due = True
-                    else:  # первая попытка
+                    else:
                         if abs((now - plan_dt).total_seconds()) <= 120:
                             due = True
 
                     if not due:
                         continue
 
-                    # ночное окно? переносим, но пишем next_try
                     if is_night(now):
                         cfg["next_try"] = bump_to_morning(now).isoformat()
                         updated = True
                         continue
 
-                    # «мягкое»? ищем дату последнего показания
                     last_read_dt = None
                     for date_str in sorted(user_data.keys(), reverse=True):
                         if date_str in ("тарифы", "настройки"):
@@ -1612,13 +1605,11 @@ async def reminder_background_task():
                                f"{EMOJI[resource]} Пора внести показания "
                                f"за <b>{resource}</b>.")
 
-                    # --- отправка ---------------------------------------------
                     try:
-                        await bot.send_message(int(user_id), msg)  # исправлено!
+                        await bot.send_message(int(user_id), msg)
                     except Exception as e:
                         print(f"❌ send_message {user_id}: {e}")
 
-                    # --- записываем служебные поля ----------------------------
                     cfg["last_sent"] = now.isoformat()
                     nxt = now + timedelta(hours=4)
                     if is_night(nxt):
@@ -1626,7 +1617,6 @@ async def reminder_background_task():
                     cfg["next_try"] = nxt.isoformat()
                     updated = True
 
-            # ======= запись файла при изменениях =========
             if updated:
                 async with lock:
                     with open(data_file, "w", encoding="utf-8") as f:
@@ -1636,7 +1626,6 @@ async def reminder_background_task():
             print(f"⚠️ reminder_background_task: {e}")
 
         await asyncio.sleep(CHECK_INTERVAL)
-
 
 
 # =======================================================
