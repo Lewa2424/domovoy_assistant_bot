@@ -4,10 +4,10 @@
 
 # === добавить сразу после импортов в БЛОКЕ 1 ==========
 import logging
-logging.basicConfig(level=logging.INFO)       # общий лог
-logging.getLogger("aiogram.event").setLevel(logging.DEBUG)
-logging.getLogger("aiogram.bot.api").setLevel(logging.ERROR)  # HTTP-ошибки Telegram
+logging.basicConfig(level=logging.INFO)
+logging.getLogger("aiogram.bot.api").setLevel(logging.ERROR)
 logging.getLogger("aiogram.dispatcher.dispatcher").setLevel(logging.ERROR)
+
 # =======================================================
 
 
@@ -1061,16 +1061,6 @@ async def gas_settings_handler(message: Message):
         "🔥 Настройки газа.\nВыберите действие:",
         reply_markup=keyboard
     )
-
-
-# =======================================================
-# === 🧱 ВРЕМЕННЫЙ DEBUG-ЭХО (удалите после проверки) ===
-# =======================================================
-
-@dp.message()          # без фильтров → срабатывает на любое сообщение,
-async def debug_echo(message: Message):
-    await message.answer(f"DEBUG: {message.text!r}")
-
 
 
 # =======================================================
