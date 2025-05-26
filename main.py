@@ -35,14 +35,23 @@ Path("storage").mkdir(exist_ok=True)
 # Теперь будет использоваться версия из БЛОКА 51.1.
 
 # =======================================================
-# === 🧱 БЛОК 2: Инициализация бота и диспетчера ========
+# === 🧱 БЛОК 2 (обновлённый): Bot + Dispatcher (IPv4) ==
 # =======================================================
+
+import socket
+from aiohttp import TCPConnector
+from aiogram.client.session.aiohttp import AiohttpSession
+
+# ── IPv4-коннектор ─────────────────────────────────────
+ipv4_connector = TCPConnector(family=socket.AF_INET)
+session = AiohttpSession(connector=ipv4_connector)
 
 bot = Bot(
     token=config.BOT_TOKEN,
+    session=session,                             # ← только IPv4
     default=DefaultBotProperties(parse_mode=ParseMode.HTML)
 )
-dp = Dispatcher(storage=MemoryStorage())
+dp  = Dispatcher(storage=MemoryStorage())
 
 
 # =======================================================
