@@ -10,29 +10,29 @@ logging.getLogger("aiogram.dispatcher.dispatcher").setLevel(logging.ERROR)
 
 # =======================================================
 
-
 import asyncio
 import os
-from datetime import datetime, timedelta
+import sys
+import json
+import traceback
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-import config  # Добавлен импорт настроек
+import config
 
 from aiogram import Bot, Dispatcher
-from aiogram.types import Message, Update # Убедимся, что Update здесь, если он нужен глобально, или оставим его импорт в БЛОКЕ 51
+from aiogram.types import Message, Update, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.filters import Command
-
-# Строка ниже УДАЛЕНА: from aiogram.webhook.aiohttp_server import SimpleRequestHandler
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 
 # Гарантируем наличие папки
 Path("storage").mkdir(exist_ok=True)
 
-# Первая (упрощенная) версия функции reminder_background_task() отсюда УДАЛЕНА.
-# Теперь будет использоваться версия из БЛОКА 51.1.
 
 # =======================================================
 # === 🧱 БЛОК 2 (обновлённый): Bot + Dispatcher (IPv4) ==
@@ -90,10 +90,6 @@ async def start_handler(message: Message):
 @dp.message(Command("add"))
 async def add_handler(message: Message):
     try:
-        from datetime import datetime
-        import json
-        from pathlib import Path
-
         # Пример команды: /add вода 23.7
         parts = message.text.strip().split()
         if len(parts) != 3:
@@ -130,75 +126,43 @@ async def add_handler(message: Message):
         await message.answer(f"⚠️ Ошибка: {e}")
 
 
-# =======================================================
-# === 🧱 БЛОК 5: Меню ⚡ Электроэнергия — обработчик =====
-# =======================================================
+=======================================================
+=== 🧱 БЛОК 5 (обновлённый): Универсальное меню ресурса
+=======================================================
 
-@dp.message(lambda message: message.text == "⚡ Электроэнергия")
-async def electricity_menu_handler(message: Message):
-    keyboard = ReplyKeyboardMarkup(
+from aiogram.utils.keyboard import ReplyKeyboardBuilder
+
+RESOURCE_LABELS = {
+    "электроэнергия": "⚡ Электроэнергия",
+    "вода": "💧 Вода",
+    "газ": "🔥 Газ"
+}
+
+def generate_resource_menu(counter_type: str) -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="➕ Внести показания (электроэнергия)")],
-            [KeyboardButton(text="💸 Внести оплату (электроэнергия)")],
-            [KeyboardButton(text="📉 Посмотреть долг (электроэнергия)")],
-            [KeyboardButton(text="📜 История показаний (электроэнергия)")],
-            [KeyboardButton(text="🧾 История оплат (электроэнергия)")],
+            [KeyboardButton(text=f"➕ Внести показания ({counter_type})")],
+            [KeyboardButton(text=f"💸 Внести оплату ({counter_type})")],
+            [KeyboardButton(text=f"📉 Посмотреть долг ({counter_type})")],
+            [KeyboardButton(text=f"📜 История показаний ({counter_type})")],
+            [KeyboardButton(text=f"🧾 История оплат ({counter_type})")],
             [KeyboardButton(text="🔙 Назад")],
         ],
         resize_keyboard=True
     )
 
-    await message.answer(
-        "Вы в разделе ⚡ Электроэнергия.\nВыберите действие:",
-        reply_markup=keyboard
-    )
+@dp.message(lambda m: m.text in RESOURCE_LABELS.values())
+async def resource_menu_handler(message: Message):
+    reverse_map = {v: k for k, v in RESOURCE_LABELS.items()}
+    counter_type = reverse_map.get(message.text)
 
-
-# =======================================================
-# === 🧱 БЛОК 6: Меню 💧 Вода — обработчик ==============
-# =======================================================
-
-@dp.message(lambda message: message.text == "💧 Вода")
-async def water_menu_handler(message: Message):
-    keyboard = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="➕ Внести показания (вода)")],
-            [KeyboardButton(text="💸 Внести оплату (вода)")],
-            [KeyboardButton(text="📉 Посмотреть долг (вода)")],
-            [KeyboardButton(text="📜 История показаний (вода)")],
-            [KeyboardButton(text="🧾 История оплат (вода)")],
-            [KeyboardButton(text="🔙 Назад")],
-        ],
-        resize_keyboard=True
-    )
+    if not counter_type:
+        await message.answer("⚠️ Неизвестный ресурс.")
+        return
 
     await message.answer(
-        "Раздел 💧 Вода.\nВыберите действие:",
-        reply_markup=keyboard
-    )
-
-
-# =======================================================
-# === 🧱 БЛОК 7: Меню 🔥 Газ — обработчик ===============
-# =======================================================
-
-@dp.message(lambda message: message.text == "🔥 Газ")
-async def gas_menu_handler(message: Message):
-    keyboard = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="➕ Внести показания (газ)")],
-            [KeyboardButton(text="💸 Внести оплату (газ)")],
-            [KeyboardButton(text="📉 Посмотреть долг (газ)")],
-            [KeyboardButton(text="📜 История показаний (газ)")],
-            [KeyboardButton(text="🧾 История оплат (газ)")],
-            [KeyboardButton(text="🔙 Назад")],
-        ],
-        resize_keyboard=True
-    )
-
-    await message.answer(
-        "Раздел 🔥 Газ.\nВыберите действие:",
-        reply_markup=keyboard
+        f"Раздел {RESOURCE_LABELS[counter_type]}.\nВыберите действие:",
+        reply_markup=generate_resource_menu(counter_type)
     )
 
 
@@ -217,9 +181,6 @@ async def electricity_history(message: Message):
 
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
-from datetime import datetime
-import json
-from pathlib import Path
 
 class ReadingState(StatesGroup):
     electricity = State()
@@ -227,87 +188,76 @@ class ReadingState(StatesGroup):
     gas = State()
 
 
-# =======================================================
-# === 🧱 БЛОК 9.1: История показаний ⚡ Электроэнергия ===
-# =======================================================
+=======================================================
+=== 🧱 БЛОК 9.1 (обновлённый): Универсальная история показаний
+=======================================================
 
-@dp.message(lambda message: message.text == "📜 История показаний (электроэнергия)")
-async def electricity_history_named(message: Message):
-    await show_history(message, "электроэнергия", "кВт⋅ч")
+HISTORY_UNITS = {
+    "электроэнергия": "кВт⋅ч",
+    "вода": "м³",
+    "газ": "м³",
+}
 
+@dp.message(lambda m: m.text and m.text.startswith("📜 История показаний ("))
+async def history_handler(message: Message):
+    try:
+        counter_type = message.text.split("(", 1)[-1].rstrip(")")
+        if counter_type not in HISTORY_UNITS:
+            await message.answer("⚠️ Неизвестный ресурс.")
+            return
 
-# =======================================================
-# === 🧱 БЛОК 9.2: История показаний 💧 Вода =============
-# =======================================================
-
-@dp.message(lambda message: message.text == "📜 История показаний (вода)")
-async def water_history(message: Message):
-    await show_history(message, "вода", "м³")
-
-
-# =======================================================
-# === 🧱 БЛОК 9.3: История показаний 🔥 Газ ==============
-# =======================================================
-
-@dp.message(lambda message: message.text == "📜 История показаний (газ)")
-async def gas_history(message: Message):
-    await show_history(message, "газ", "м³")
+        await show_history(message, counter_type, HISTORY_UNITS[counter_type])
+    except Exception as e:
+        await message.answer(f"⚠️ Ошибка при обработке запроса: {e}")
 
 
-# =======================================================
-# === 🧱 БЛОК 10: Ввод показаний ⚡ Электроэнергии =======
-# =======================================================
+=======================================================
+=== 🧱 БЛОК 10 (обновлённый): Универсальный ввод показаний
+=======================================================
 
-@dp.message(lambda message: message.text == "➕ Внести показания (электроэнергия)")
-async def start_electricity_reading(message: Message, state: FSMContext):
-    await state.set_state(ReadingState.electricity)
-    last = get_last_value(message.from_user.id, "электроэнергия")
-    msg = "Введите текущие показания электроэнергии (кВт⋅ч):"
-    if last is not None:
-        msg += f"\n_(предыдущее: {last})_"
-    await message.answer(msg, parse_mode="Markdown")
+READING_STATES = {
+    "электроэнергия": ReadingState.electricity,
+    "вода": ReadingState.water,
+    "газ": ReadingState.gas,
+}
 
-@dp.message(ReadingState.electricity)
-async def save_electricity_reading(message: Message, state: FSMContext):
-    await save_reading(message, state, "электроэнергия")
-    await state.clear()
+READING_UNITS = {
+    "электроэнергия": "кВт⋅ч",
+    "вода": "м³",
+    "газ": "м³",
+}
 
+@dp.message(lambda m: m.text and m.text.startswith("➕ Внести показания ("))
+async def start_reading_handler(message: Message, state: FSMContext):
+    try:
+        counter_type = message.text.split("(", 1)[-1].rstrip(")")
+        if counter_type not in READING_STATES:
+            await message.answer("⚠️ Неизвестный тип ресурса.")
+            return
 
-# =======================================================
-# === 🧱 БЛОК 11: Ввод показаний 💧 Воды ================
-# =======================================================
+        await state.set_state(READING_STATES[counter_type])
+        last = get_last_value(message.from_user.id, counter_type)
+        msg = f"Введите текущие показания {counter_type} ({READING_UNITS[counter_type]}):"
+        if last is not None:
+            msg += f"\n_(предыдущее: {last})_"
+        await message.answer(msg, parse_mode="Markdown")
+    except Exception as e:
+        await message.answer(f"⚠️ Ошибка: {e}")
 
-@dp.message(lambda message: message.text == "➕ Внести показания (вода)")
-async def start_water_reading(message: Message, state: FSMContext):
-    await state.set_state(ReadingState.water)
-    last = get_last_value(message.from_user.id, "вода")
-    msg = "Введите текущие показания по воде (м³):"
-    if last is not None:
-        msg += f"\n_(предыдущее: {last})_"
-    await message.answer(msg, parse_mode="Markdown")
+@dp.message(READING_STATES["электроэнергия"])
+@dp.message(READING_STATES["вода"])
+@dp.message(READING_STATES["газ"])
+async def save_reading_handler(message: Message, state: FSMContext):
+    # определяем по текущему состоянию, какой ресурс обрабатывается
+    current_state = await state.get_state()
+    reverse_map = {v.state: k for k, v in READING_STATES.items()}
+    counter_type = reverse_map.get(current_state)
 
-@dp.message(ReadingState.water)
-async def save_water_reading(message: Message, state: FSMContext):
-    await save_reading(message, state, "вода")
-    await state.clear()
+    if not counter_type:
+        await message.answer("⚠️ Неизвестное состояние. Попробуйте снова.")
+        return
 
-
-# =======================================================
-# === 🧱 БЛОК 12: Ввод показаний 🔥 Газа ================
-# =======================================================
-
-@dp.message(lambda message: message.text == "➕ Внести показания (газ)")
-async def start_gas_reading(message: Message, state: FSMContext):
-    await state.set_state(ReadingState.gas)
-    last = get_last_value(message.from_user.id, "газ")
-    msg = "Введите текущие показания по газу (м³):"
-    if last is not None:
-        msg += f"\n_(предыдущее: {last})_"
-    await message.answer(msg, parse_mode="Markdown")
-
-@dp.message(ReadingState.gas)
-async def save_gas_reading(message: Message, state: FSMContext):
-    await save_reading(message, state, "газ")
+    await save_reading(message, state, counter_type)
     await state.clear()
 
 
@@ -451,48 +401,42 @@ class PaymentState(StatesGroup):
     gas = State()
 
 
-# =======================================================
-# === 🧱 БЛОК 17: Обработка оплаты ⚡ Электроэнергии =====
-# =======================================================
+=======================================================
+=== 🧱 БЛОК 17 (обновлённый): Универсальный ввод оплат
+=======================================================
 
-@dp.message(lambda message: message.text == "💸 Внести оплату (электроэнергия)")
-async def start_electricity_payment(message: Message, state: FSMContext):
-    await state.set_state(PaymentState.electricity)
-    await message.answer("Введите сумму оплаты за электроэнергию (грн):")
+PAYMENT_STATES = {
+    "электроэнергия": PaymentState.electricity,
+    "вода": PaymentState.water,
+    "газ": PaymentState.gas,
+}
 
-@dp.message(PaymentState.electricity)
-async def save_electricity_payment(message: Message, state: FSMContext):
-    await save_payment(message, state, "электроэнергия")
-    await state.clear()
+@dp.message(lambda m: m.text and m.text.startswith("💸 Внести оплату ("))
+async def start_payment_handler(message: Message, state: FSMContext):
+    try:
+        counter_type = message.text.split("(", 1)[-1].rstrip(")")
+        if counter_type not in PAYMENT_STATES:
+            await message.answer("⚠️ Неизвестный тип ресурса.")
+            return
 
+        await state.set_state(PAYMENT_STATES[counter_type])
+        await message.answer(f"Введите сумму оплаты за {counter_type} (грн):")
+    except Exception as e:
+        await message.answer(f"⚠️ Ошибка: {e}")
 
-# =======================================================
-# === 🧱 БЛОК 18: Обработка оплаты 💧 Воды ===============
-# =======================================================
+@dp.message(PAYMENT_STATES["электроэнергия"])
+@dp.message(PAYMENT_STATES["вода"])
+@dp.message(PAYMENT_STATES["газ"])
+async def save_payment_handler(message: Message, state: FSMContext):
+    current_state = await state.get_state()
+    reverse_map = {v.state: k for k, v in PAYMENT_STATES.items()}
+    counter_type = reverse_map.get(current_state)
 
-@dp.message(lambda message: message.text == "💸 Внести оплату (вода)")
-async def start_water_payment(message: Message, state: FSMContext):
-    await state.set_state(PaymentState.water)
-    await message.answer("Введите сумму оплаты за воду (грн):")
+    if not counter_type:
+        await message.answer("⚠️ Неизвестное состояние. Попробуйте снова.")
+        return
 
-@dp.message(PaymentState.water)
-async def save_water_payment(message: Message, state: FSMContext):
-    await save_payment(message, state, "вода")
-    await state.clear()
-
-
-# =======================================================
-# === 🧱 БЛОК 19: Обработка оплаты 🔥 Газа ===============
-# =======================================================
-
-@dp.message(lambda message: message.text == "💸 Внести оплату (газ)")
-async def start_gas_payment(message: Message, state: FSMContext):
-    await state.set_state(PaymentState.gas)
-    await message.answer("Введите сумму оплаты за газ (грн):")
-
-@dp.message(PaymentState.gas)
-async def save_gas_payment(message: Message, state: FSMContext):
-    await save_payment(message, state, "газ")
+    await save_payment(message, state, counter_type)
     await state.clear()
 
 
@@ -568,31 +512,21 @@ async def save_payment(message: Message, state: FSMContext, counter_type: str):
         await message.answer(f"⚠️ Ошибка: {e}")
 
 
-# =======================================================
-# === 🧱 БЛОК 21: Просмотр долга ⚡ Электроэнергия =======
-# =======================================================
+=======================================================
+=== 🧱 БЛОК 21 (обновлённый): Универсальный просмотр долга
+=======================================================
 
-@dp.message(lambda message: message.text == "📉 Посмотреть долг (электроэнергия)")
-async def view_debt_electricity(message: Message):
-    await show_debt(message, "электроэнергия")
+@dp.message(lambda m: m.text and m.text.startswith("📉 Посмотреть долг ("))
+async def view_debt_handler(message: Message):
+    try:
+        counter_type = message.text.split("(", 1)[-1].rstrip(")")
+        if counter_type not in ("электроэнергия", "вода", "газ"):
+            await message.answer("⚠️ Неизвестный ресурс.")
+            return
 
-
-# =======================================================
-# === 🧱 БЛОК 22: Просмотр долга 💧 Вода ================
-# =======================================================
-
-@dp.message(lambda message: message.text == "📉 Посмотреть долг (вода)")
-async def view_debt_water(message: Message):
-    await show_debt(message, "вода")
-
-
-# =======================================================
-# === 🧱 БЛОК 23: Просмотр долга 🔥 Газ =================
-# =======================================================
-
-@dp.message(lambda message: message.text == "📉 Посмотреть долг (газ)")
-async def view_debt_gas(message: Message):
-    await show_debt(message, "газ")
+        await show_debt(message, counter_type)
+    except Exception as e:
+        await message.answer(f"⚠️ Ошибка при обработке запроса: {e}")
 
 
 # =======================================================
@@ -871,31 +805,21 @@ async def show_payment_history(message: Message, counter_type: str):
         await message.answer(f"⚠️ Ошибка: {e}")
 
 
-# =======================================================
-# === 🧱 БЛОК 28: История оплат ⚡ Электроэнергия =========
-# =======================================================
+=======================================================
+=== 🧱 БЛОК 28 (обновлённый): Универсальная история оплат
+=======================================================
 
-@dp.message(lambda message: message.text == "🧾 История оплат (электроэнергия)")
-async def electricity_payment_history(message: Message):
-    await show_payment_history(message, "электроэнергия")
+@dp.message(lambda m: m.text and m.text.startswith("🧾 История оплат ("))
+async def payment_history_handler(message: Message):
+    try:
+        counter_type = message.text.split("(", 1)[-1].rstrip(")")
+        if counter_type not in ("электроэнергия", "вода", "газ"):
+            await message.answer("⚠️ Неизвестный ресурс.")
+            return
 
-
-# =======================================================
-# === 🧱 БЛОК 29: История оплат 💧 Вода ==================
-# =======================================================
-
-@dp.message(lambda message: message.text == "🧾 История оплат (вода)")
-async def water_payment_history(message: Message):
-    await show_payment_history(message, "вода")
-
-
-# =======================================================
-# === 🧱 БЛОК 30: История оплат 🔥 Газ ===================
-# =======================================================
-
-@dp.message(lambda message: message.text == "🧾 История оплат (газ)")
-async def gas_payment_history(message: Message):
-    await show_payment_history(message, "газ")    
+        await show_payment_history(message, counter_type)
+    except Exception as e:
+        await message.answer(f"⚠️ Ошибка при обработке запроса: {e}")
 
 
 # =======================================================
@@ -908,48 +832,54 @@ class TariffState(StatesGroup):
     gas = State()
 
 
-# =======================================================
-# === 🧱 БЛОК 32: Ввод тарифа ⚡ Электроэнергия ==========
-# =======================================================
+=======================================================
+=== 🧱 БЛОК 32 (обновлённый): Универсальный ввод тарифа
+=======================================================
 
-@dp.message(lambda message: message.text == "💰 Ввести тариф за свет")
-async def start_electricity_tariff(message: Message, state: FSMContext):
-    await state.set_state(TariffState.electricity)
-    await message.answer("Введите тариф за электроэнергию (грн/кВт⋅ч):")
+TARIFF_STATES = {
+    "электроэнергия": TariffState.electricity,
+    "вода": TariffState.water,
+    "газ": TariffState.gas,
+}
 
-@dp.message(TariffState.electricity)
-async def save_electricity_tariff(message: Message, state: FSMContext):
-    await save_tariff(message, state, "электроэнергия")
-    await state.clear()
+TARIFF_PROMPTS = {
+    "электроэнергия": "Введите тариф за электроэнергию (грн/кВт⋅ч):",
+    "вода": "Введите тариф за воду (грн/м³):",
+    "газ": "Введите тариф за газ (грн/м³):",
+}
 
+@dp.message(lambda m: m.text and m.text.startswith("💰 Ввести тариф за "))
+async def start_tariff_handler(message: Message, state: FSMContext):
+    try:
+        suffix = message.text.split("за", 1)[-1].strip().lower()
+        map_suffix = {
+            "свет": "электроэнергия",
+            "воду": "вода",
+            "газ": "газ",
+        }
+        counter_type = map_suffix.get(suffix)
+        if not counter_type or counter_type not in TARIFF_STATES:
+            await message.answer("⚠️ Неизвестный ресурс.")
+            return
 
-# =======================================================
-# === 🧱 БЛОК 33: Ввод тарифа 💧 Вода ====================
-# =======================================================
+        await state.set_state(TARIFF_STATES[counter_type])
+        await message.answer(TARIFF_PROMPTS[counter_type])
+    except Exception as e:
+        await message.answer(f"⚠️ Ошибка: {e}")
 
-@dp.message(lambda message: message.text == "💰 Ввести тариф за воду")
-async def start_water_tariff(message: Message, state: FSMContext):
-    await state.set_state(TariffState.water)
-    await message.answer("Введите тариф за воду (грн/м³):")
+@dp.message(TARIFF_STATES["электроэнергия"])
+@dp.message(TARIFF_STATES["вода"])
+@dp.message(TARIFF_STATES["газ"])
+async def save_tariff_handler(message: Message, state: FSMContext):
+    current_state = await state.get_state()
+    reverse_map = {v.state: k for k, v in TARIFF_STATES.items()}
+    counter_type = reverse_map.get(current_state)
 
-@dp.message(TariffState.water)
-async def save_water_tariff(message: Message, state: FSMContext):
-    await save_tariff(message, state, "вода")
-    await state.clear()
+    if not counter_type:
+        await message.answer("⚠️ Неизвестное состояние. Попробуйте снова.")
+        return
 
-
-# =======================================================
-# === 🧱 БЛОК 34: Ввод тарифа 🔥 Газ =====================
-# =======================================================
-
-@dp.message(lambda message: message.text == "💰 Ввести тариф за газ")
-async def start_gas_tariff(message: Message, state: FSMContext):
-    await state.set_state(TariffState.gas)
-    await message.answer("Введите тариф за газ (грн/м³):")
-
-@dp.message(TariffState.gas)
-async def save_gas_tariff(message: Message, state: FSMContext):
-    await save_tariff(message, state, "газ")
+    await save_tariff(message, state, counter_type)
     await state.clear()
 
 
@@ -1111,64 +1041,61 @@ class SettingsState(StatesGroup):
     gas_debt = State()
 
 
-# =======================================================
-# === 🧱 БЛОК 40.1: FSM для установки напоминаний =======
-# =======================================================
+=======================================================
+=== 🧱 БЛОК 40.1 (обновлённый): Универсальный ввод напоминания
+=======================================================
 
-class ReminderState(StatesGroup):
-    electricity = State()
-    water = State()
-    gas = State()
+REMINDER_STATES = {
+    "электроэнергия": ReminderState.electricity,
+    "вода": ReminderState.water,
+    "газ": ReminderState.gas,
+}
 
+REMINDER_PROMPTS = {
+    "электроэнергия": "⏰ Введите день и время напоминания для электроэнергии через пробел:\n<b>01 08:00</b>",
+    "вода": "⏰ Введите день и время напоминания для воды через пробел:\n<b>01 08:00</b>",
+    "газ": "⏰ Введите день и время напоминания для газа через пробел:\n<b>01 08:00</b>",
+}
 
-@dp.message(lambda message: message.text == "⏰ Установить напоминание (электроэнергия)")
-async def set_reminder_electricity(message: Message, state: FSMContext):
-    await state.set_state(ReminderState.electricity)
-    await message.answer("⏰ Введите день и время напоминания для электроэнергии через пробел:\n<b>01 08:00</b>")
+@dp.message(lambda m: m.text and m.text.startswith("⏰ Установить напоминание ("))
+async def start_reminder_handler(message: Message, state: FSMContext):
+    try:
+        counter_type = message.text.split("(", 1)[-1].rstrip(")")
+        if counter_type not in REMINDER_STATES:
+            await message.answer("⚠️ Неизвестный ресурс.")
+            return
 
+        await state.set_state(REMINDER_STATES[counter_type])
+        await message.answer(REMINDER_PROMPTS[counter_type])
+    except Exception as e:
+        await message.answer(f"⚠️ Ошибка: {e}")
 
 @dp.message(ReminderState.electricity)
-async def save_reminder_electricity(message: Message, state: FSMContext):
-    await save_reminder_time(message, state, "электроэнергия")
-
-
-@dp.message(lambda message: message.text == "⏰ Установить напоминание (вода)")
-async def set_reminder_water(message: Message, state: FSMContext):
-    await state.set_state(ReminderState.water)
-    await message.answer("⏰ Введите день и время напоминания для воды через пробел:\n<b>01 08:00</b>")
-
-
 @dp.message(ReminderState.water)
-async def save_reminder_water(message: Message, state: FSMContext):
-    await save_reminder_time(message, state, "вода")
-
-
-@dp.message(lambda message: message.text == "⏰ Установить напоминание (газ)")
-async def set_reminder_gas(message: Message, state: FSMContext):
-    await state.set_state(ReminderState.gas)
-    await message.answer("⏰ Введите день и время напоминания для газа через пробел:\n<b>01 08:00</b>")
-
-
 @dp.message(ReminderState.gas)
-async def save_reminder_gas(message: Message, state: FSMContext):
-    await save_reminder_time(message, state, "газ")
+async def save_reminder_handler(message: Message, state: FSMContext):
+    current_state = await state.get_state()
+    reverse_map = {v.state: k for k, v in REMINDER_STATES.items()}
+    counter_type = reverse_map.get(current_state)
+
+    if not counter_type:
+        await message.answer("⚠️ Неизвестное состояние. Попробуйте снова.")
+        return
+
+    await save_reminder_time(message, state, counter_type)
 
 
 # =======================================================
 # === 🧱 БЛОК 40.2: сохранение напоминания   (NEW) ======
 # =======================================================
 #
-# • При каждой установке стираем служебные поля
-#   next_try / last_sent, чтобы цикл начал работу с «чистого листа».
-# • Логика ввода (день-время) не менялась.
-#
 async def save_reminder_time(message: Message, state: FSMContext, counter_type: str):
     try:
-        from datetime import datetime
-        from pathlib import Path
-        import json
+        parts = message.text.strip().split()
+        if len(parts) != 2:
+            raise ValueError("Формат ввода должен быть: <день> <время>")
 
-        day_str, time_str = message.text.strip().split()
+        day_str, time_str = parts
         day = int(day_str)
         if not (1 <= day <= 31):
             raise ValueError("Недопустимый день")
@@ -1190,7 +1117,6 @@ async def save_reminder_time(message: Message, state: FSMContext, counter_type: 
         cfg = settings.setdefault(key, {})
         cfg["день"] = day
         cfg["время"] = time_str
-        # — сброс служебных полей —
         cfg.pop("next_try", None)
         cfg.pop("last_sent", None)
 
@@ -1211,88 +1137,91 @@ async def save_reminder_time(message: Message, state: FSMContext, counter_type: 
         await state.clear()
 
 
-# =======================================================
-# === 🧱 БЛОК 41: Ввод начальных показаний ⚡ Электроэнергия
-# =======================================================
+=======================================================
+=== 🧱 БЛОК 41 (обновлённый): Универсальный ввод показаний и долгов
+=======================================================
 
-@dp.message(lambda message: message.text == "📝 Внести начальные показания электроэнергии")
-async def start_electricity_initial(message: Message, state: FSMContext):
-    await state.set_state(SettingsState.electricity_initial)
-    await message.answer("Введите начальные показания счётчика электроэнергии (кВт⋅ч):")
+INITIAL_STATES = {
+    "электроэнергия": SettingsState.electricity_initial,
+    "вода": SettingsState.water_initial,
+    "газ": SettingsState.gas_initial,
+}
 
-@dp.message(SettingsState.electricity_initial)
-async def save_electricity_initial(message: Message, state: FSMContext):
-    await save_initial_reading(message, state, "электроэнергия")
+DEBT_STATES = {
+    "электроэнергия": SettingsState.electricity_debt,
+    "вода": SettingsState.water_debt,
+    "газ": SettingsState.gas_debt,
+}
 
+INITIAL_PROMPTS = {
+    "электроэнергия": "Введите начальные показания счётчика электроэнергии (кВт⋅ч):",
+    "вода": "Введите начальные показания счётчика воды (м³):",
+    "газ": "Введите начальные показания счётчика газа (м³):",
+}
 
-# =======================================================
-# === 🧱 БЛОК 42: Ввод начальных показаний 💧 Вода =========
-# =======================================================
-
-@dp.message(lambda message: message.text == "📝 Внести начальные показания воды")
-async def start_water_initial(message: Message, state: FSMContext):
-    await state.set_state(SettingsState.water_initial)
-    await message.answer("Введите начальные показания счётчика воды (м³):")
-
-@dp.message(SettingsState.water_initial)
-async def save_water_initial(message: Message, state: FSMContext):
-    await save_initial_reading(message, state, "вода")
-
-
-# =======================================================
-# === 🧱 БЛОК 43: Ввод начальных показаний 🔥 Газ ==========
-# =======================================================
-
-@dp.message(lambda message: message.text == "📝 Внести начальные показания газа")
-async def start_gas_initial(message: Message, state: FSMContext):
-    await state.set_state(SettingsState.gas_initial)
-    await message.answer("Введите начальные показания счётчика газа (м³):")
-
-@dp.message(SettingsState.gas_initial)
-async def save_gas_initial(message: Message, state: FSMContext):
-    await save_initial_reading(message, state, "газ")
+DEBT_PROMPTS = {
+    "электроэнергия": "Введите сумму начального долга за электроэнергию (грн):",
+    "вода": "Введите сумму начального долга за воду (грн):",
+    "газ": "Введите сумму начального долга за газ (грн):",
+}
 
 
-# =======================================================
-# === 🧱 БЛОК 44: Ввод начального долга ⚡ Электроэнергия ==
-# =======================================================
+@dp.message(lambda m: m.text and m.text.startswith("📝 Внести начальные показания "))
+async def start_initial_handler(message: Message, state: FSMContext):
+    suffix = message.text.split("показания", 1)[-1].strip().lower()
+    map_suffix = {
+        "электроэнергии": "электроэнергия",
+        "воды": "вода",
+        "газа": "газ",
+    }
+    counter_type = map_suffix.get(suffix)
+    if not counter_type or counter_type not in INITIAL_STATES:
+        await message.answer("⚠️ Неизвестный ресурс.")
+        return
 
-@dp.message(lambda message: message.text == "💰 Внести начальный долг за электроэнергию")
-async def start_electricity_debt(message: Message, state: FSMContext):
-    await state.set_state(SettingsState.electricity_debt)
-    await message.answer("Введите сумму начального долга за электроэнергию (грн):")
+    await state.set_state(INITIAL_STATES[counter_type])
+    await message.answer(INITIAL_PROMPTS[counter_type])
 
-@dp.message(SettingsState.electricity_debt)
-async def save_electricity_debt(message: Message, state: FSMContext):
-    await save_initial_debt(message, state, "электроэнергия")
-
-
-# =======================================================
-# === 🧱 БЛОК 45: Ввод начального долга 💧 Вода ============
-# =======================================================
-
-@dp.message(lambda message: message.text == "💰 Внести начальный долг за воду")
-async def start_water_debt(message: Message, state: FSMContext):
-    await state.set_state(SettingsState.water_debt)
-    await message.answer("Введите сумму начального долга за воду (грн):")
-
-@dp.message(SettingsState.water_debt)
-async def save_water_debt(message: Message, state: FSMContext):
-    await save_initial_debt(message, state, "вода")
+@dp.message(INITIAL_STATES["электроэнергия"])
+@dp.message(INITIAL_STATES["вода"])
+@dp.message(INITIAL_STATES["газ"])
+async def save_initial_handler(message: Message, state: FSMContext):
+    current_state = await state.get_state()
+    reverse_map = {v.state: k for k, v in INITIAL_STATES.items()}
+    counter_type = reverse_map.get(current_state)
+    if not counter_type:
+        await message.answer("⚠️ Неизвестное состояние.")
+        return
+    await save_initial_reading(message, state, counter_type)
 
 
-# =======================================================
-# === 🧱 БЛОК 46: Ввод начального долга 🔥 Газ =============
-# =======================================================
+@dp.message(lambda m: m.text and m.text.startswith("💰 Внести начальный долг за "))
+async def start_debt_handler(message: Message, state: FSMContext):
+    suffix = message.text.split("за", 1)[-1].strip().lower()
+    map_suffix = {
+        "электроэнергию": "электроэнергия",
+        "воду": "вода",
+        "газ": "газ",
+    }
+    counter_type = map_suffix.get(suffix)
+    if not counter_type or counter_type not in DEBT_STATES:
+        await message.answer("⚠️ Неизвестный ресурс.")
+        return
 
-@dp.message(lambda message: message.text == "💰 Внести начальный долг за газ")
-async def start_gas_debt(message: Message, state: FSMContext):
-    await state.set_state(SettingsState.gas_debt)
-    await message.answer("Введите сумму начального долга за газ (грн):")
+    await state.set_state(DEBT_STATES[counter_type])
+    await message.answer(DEBT_PROMPTS[counter_type])
 
-@dp.message(SettingsState.gas_debt)
-async def save_gas_debt(message: Message, state: FSMContext):
-    await save_initial_debt(message, state, "газ")
+@dp.message(DEBT_STATES["электроэнергия"])
+@dp.message(DEBT_STATES["вода"])
+@dp.message(DEBT_STATES["газ"])
+async def save_debt_handler(message: Message, state: FSMContext):
+    current_state = await state.get_state()
+    reverse_map = {v.state: k for k, v in DEBT_STATES.items()}
+    counter_type = reverse_map.get(current_state)
+    if not counter_type:
+        await message.answer("⚠️ Неизвестное состояние.")
+        return
+    await save_initial_debt(message, state, counter_type)
 
 
 # =======================================================
@@ -1304,7 +1233,6 @@ async def save_initial_reading(message: Message, state: FSMContext, counter_type
         value = float(message.text.strip().replace(',', '.'))
         user_id = str(message.from_user.id)
         data_file = Path("storage/data.json")
-        import json
         if data_file.exists():
             with open(data_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
@@ -1335,7 +1263,6 @@ async def save_initial_debt(message: Message, state: FSMContext, counter_type: s
         value = float(message.text.strip().replace(',', '.'))
         user_id = str(message.from_user.id)
         data_file = Path("storage/data.json")
-        import json
         if data_file.exists():
             with open(data_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
@@ -1513,8 +1440,6 @@ def bump_to_morning(dt: datetime) -> datetime:
 
 async def reminder_background_task():
     import asyncio
-    import json
-    from pathlib import Path
 
     lock = asyncio.Lock()          # защита от одновременной записи
     data_file = Path("storage/data.json")
